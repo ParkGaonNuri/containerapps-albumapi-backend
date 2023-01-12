@@ -1,0 +1,61 @@
+# Docker
+# Build a Docker image
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry service connection established during pipeline creation
+  tag: '$(Build.BuildId)'
+  containerRegistry: 'peoplefundacr.azurecr.io'
+  acrname: 'peoplefundacr'
+  poolName: 'Default'
+  resource_group: 'peoplefund-test-rg'
+  location: 'koreacentral'
+  container_env: 'album-env'
+
+stages:
+- stage: Build
+  displayName: Build albumBackend Containers
+  jobs:
+  - job: Build1
+    displayName: Build albumBackend
+    pool: $(poolName)
+    steps:
+    - task: Bash@3
+      displayName: Build albumBackend Image
+      inputs:
+        targetType: 'inline'
+        script: |
+            docker build --pull -t $(containerRegistry)/albumbackend:$(tag) -t $(containerRegistry)/albumbackend:$(tag) ./src
+            docker image list
+    - task: Bash@3
+      displayName: Push albumBackend Image
+      inputs:
+        targetType: 'inline'
+        script: |
+          az login --identity
+          az acr login --name $(acrname)
+          docker push $(containerRegistry)/albumbackend:$(tag)
+- stage: Deploy
+  displayName: Deploy albumBackend Containers
+  dependsOn: [Build]
+  jobs:
+  - job: Deploy1
+    displayName: Deploy albumBackend
+    pool: $(poolName)
+    steps:
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          az containerapp env create --name $(container_env) --resource-group $(resource_group) --location $(location)
+          az containerapp create --image $(containerRegistry)/albumbackend:$(tag) \
+          --name albumbackend --resource-group $(resource_group) --environment $(container_env) \
+          --query properties.configuration.ingress.fqdn --registry-server $(containerRegistry) \
+          --registry-username $(acrname) --registry-password $(registry_pwd) \
+          --min-replicas 1 --ingress internal --target-port 3500
